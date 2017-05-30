@@ -1,0 +1,1225 @@
+*&----------------------------------------------------------------------*
+*&                           CAPGEMINI                                  *
+*&----------------------------------------------------------------------*
+* Autor      : Michael Cardoso Couto Lopes                              *
+* Funcional  :                                                          *
+* Data       : 25/04/2017                                               *
+* Descrição  : Atualização de dados prestadores mensais Contrato        *
+* Transação  : ZMM0081                                                  *
+* Projeto    : Logística                                                *
+* GAP        : ZLOGMMC0067                                              *
+* Observaçoes:                                                          *
+*                                                                       *
+*                                                                       *
+*&----------------------------------------------------------------------*
+*& Historico das modificações
+*&----------------------------------------------------------------------*
+*& Data       |    Nome         | GAP        | Descrição                *
+*&            |                 |            |                          *
+*&            |                 |            |                          *
+*&            |                 |            |                          *
+*&----------------------------------------------------------------------*
+
+REPORT zmmc0067 .
+
+*---------------------------------------------------------------------*
+* Includes
+*---------------------------------------------------------------------*
+INCLUDE zmmc0067_top.
+
+INCLUDE zmmc0067_scr.
+
+INCLUDE zmmc0067_f01.
+
+*---------------------------------------------------------------------*
+* START-OF-SELECTION
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  PERFORM f_cria_log.
+
+  IF p_arq IS NOT INITIAL.
+
+    PERFORM f_processar_arquivo.
+
+  ELSE.
+
+    PERFORM f_exibir_log_filtrado.
+    EXIT.
+
+  ENDIF.
+
+  PERFORM f_gravar_msg_log.
+
+  PERFORM f_salvar_log.
+
+  PERFORM f_exibir_log.
+
+
+*--------------------------------------------------------------------------------*
+
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZMMC0067_TOP
+*&---------------------------------------------------------------------*
+
+*---------------------------------------------------------------------*
+*Estrutura
+*---------------------------------------------------------------------*
+
+ TYPES:
+
+   BEGIN OF ty_msg_add,
+     nivel TYPE n LENGTH 7, " Posição da linha inserida (Cabeçalho, Corpo e Rodapé DO LOG).
+     tipo  TYPE c,          " Erro, Alerta ou Sucesso.
+     msg1  TYPE syst_msgv,  " MSG Parte 1
+     msg2  TYPE syst_msgv,  " MSG Parte 2
+     msg3  TYPE syst_msgv,  " MSG Parte 3
+     msg4  TYPE syst_msgv,  " Linha do Arquivo.
+     linha TYPE n LENGTH 7, " Linha do arquivo, para o SORT.
+   END OF ty_msg_add.
+
+*---------------------------------------------------------------------*
+*Instancia
+*---------------------------------------------------------------------*
+ DATA: lcl_bal_log   TYPE REF TO zcl_bc_bal_log,
+       lcl_exception TYPE REF TO cx_oo_message,
+       lcl_interface TYPE REF TO zcl_bc_interface.
+
+*---------------------------------------------------------------------*
+*Variavel
+*---------------------------------------------------------------------*
+
+ DATA: vl_file_name        TYPE string,
+       vl_salario_base     TYPE string,
+       vl_remun_mensal     TYPE string,
+       vl_jornada_trab     TYPE string,
+       vl_dt_ini_contrato  TYPE string,
+       vl_dt_fim_contrato  TYPE string,
+       vl_dt_admissao_empr TYPE string,
+       vl_dt_recisao_empr  TYPE string,
+       vl_dtini            TYPE sy-datum,
+       vl_hrini            TYPE sy-uzeit,
+       vl_campo            TYPE string,
+       vl_attr1            TYPE char50,
+       vl_attr2            TYPE char50,
+       vl_attr3            TYPE char50,
+       vl_attr4            TYPE char50,
+       vl_text             TYPE char100,
+       vl_flag             TYPE i VALUE 0,
+       vl_tipo_msg         TYPE c,
+       vl_cpf              TYPE char20,
+       vl_cnpj             TYPE char20,
+       vl_cpf_1            TYPE char11,
+       vl_cnpj_1           TYPE char14,
+       vl_cpf_2            TYPE pbr99_cpf,
+       vl_cnpj_2           TYPE pbr99_cgc,
+       vl_hr_trab_ini      TYPE string,
+       vl_hr_trab_fim      TYPE string,
+       vg_dt_valida        TYPE c,
+       vl_konnr            TYPE konnr,
+       vl_message          TYPE string.
+
+
+*---------------------------------------------------------------------*
+*Tabela Interna
+*---------------------------------------------------------------------*
+ DATA: tl_msg_add TYPE TABLE OF ty_msg_add,
+       tl_bapiret TYPE TABLE OF bapiret2.
+*---------------------------------------------------------------------*
+*Tabela Global
+*---------------------------------------------------------------------*
+ DATA: tg_saida          TYPE TABLE OF string,
+       tg_contrato       TYPE TABLE OF zmms0067,
+       tg_zmmt0030       TYPE TABLE OF zmmt0030,
+       tg_zmmt0031       TYPE TABLE OF zmms0072, " estrutura com dois campos usados para select.
+       tg_but000         TYPE TABLE OF zmms0073,
+       tg_zmmt0035       TYPE TABLE OF zmmt0035,
+       tg_zmmt0035_aux   TYPE TABLE OF zmmt0035,
+       tg_t001w          TYPE TABLE OF zmms0077,
+       tg_dfkkbptaxnum   TYPE TABLE OF zmms0079,
+       tg_dfkkbptaxnum_2 TYPE TABLE OF zmms0079.
+
+
+*---------------------------------------------------------------------*
+*Tipo de Linha
+*---------------------------------------------------------------------*
+ DATA: ls_zmmt0031     LIKE LINE OF tg_zmmt0031,
+       ls_zmmt0030     LIKE LINE OF tg_zmmt0030,
+       ls_but000       LIKE LINE OF tg_but000,
+       ls_bapiret      LIKE LINE OF tl_bapiret,
+       ls_dfkkbptaxnum LIKE LINE OF tg_dfkkbptaxnum.
+
+
+
+*---------------------------------------------------------------------*
+*Work Area
+*---------------------------------------------------------------------*
+ DATA: wg_contrato     TYPE zmms0067,
+       wg_zmmt0035     TYPE zmmt0035,
+       wg_zmmt0035_aux TYPE zmmt0035,
+       wa_saida        TYPE string.
+
+
+*---------------------------------------------------------------------*
+*Constantes
+*---------------------------------------------------------------------*
+
+ CONSTANTS: c_i            TYPE c                VALUE 'I',
+            c_a            TYPE c                VALUE 'A',
+            c_csv          TYPE char4            VALUE '.csv',
+            c_sim          TYPE c                VALUE '1',
+            c_zlogmmc0067  TYPE balhdr-object    VALUE 'ZLOGMMC0067',
+            c_zslogmmc0067 TYPE balhdr-subobject VALUE 'ZSLOGMMC0067',
+            c_class_msg    TYPE char7            VALUE 'ZMM_001',
+            c_taxtype      TYPE bptaxtype        VALUE 'BR2'.
+
+
+*--------------------------------------------------------------------------------------------------*
+
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZMMC0067_SCR
+*&---------------------------------------------------------------------*
+
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-033.
+PARAMETERS: p_arq TYPE rlgrap-filename  MODIF ID imp. "rlgrap-filename
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE text-034.
+PARAMETERS: cb_log AS CHECKBOX USER-COMMAND ucom.
+PARAMETERS: p_dtini TYPE balhdr-aldate DEFAULT sy-datum,
+            p_hrini TYPE balhdr-altime DEFAULT 000000,
+            p_dtfim TYPE balhdr-aldate DEFAULT sy-datum,
+            p_hrfim TYPE balhdr-altime DEFAULT sy-uzeit.
+SELECTION-SCREEN END OF BLOCK b2.
+
+
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_arq.
+  PERFORM f_buscar_arquivo.
+
+
+
+
+*-----------------------------------------------------------------------------*
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZMMC0067_F01
+*&---------------------------------------------------------------------*
+
+FORM f_buscar_arquivo.
+
+  " função para buscar arquivo
+  CALL FUNCTION 'KD_GET_FILENAME_ON_F4'
+    EXPORTING
+      program_name  = syst-repid
+      mask          = c_csv
+    CHANGING
+      file_name     = p_arq
+    EXCEPTIONS
+      mask_too_long = 1
+      OTHERS        = 2.
+
+ENDFORM.
+
+
+FORM f_valid_formato_arquivo.
+
+  MOVE p_arq TO vl_file_name.
+
+  "verificar se o arquivo é " .csv "
+  FIND FIRST OCCURRENCE OF c_csv IN vl_file_name.
+
+  IF sy-subrc NE 0.
+    MESSAGE text-027 TYPE 'I' DISPLAY LIKE 'E'.
+    STOP.
+  ENDIF.
+
+ENDFORM.
+
+FORM f_get_arquivo.
+
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      filename                = vl_file_name
+      filetype                = 'ASC'
+    TABLES
+      data_tab                = tg_saida
+    EXCEPTIONS
+      file_open_error         = 1
+      file_read_error         = 2
+      no_batch                = 3
+      gui_refuse_filetransfer = 4
+      invalid_type            = 5
+      no_authority            = 6
+      unknown_error           = 7
+      bad_data_format         = 8
+      header_not_allowed      = 9
+      separator_not_allowed   = 10
+      header_too_long         = 11
+      unknown_dp_error        = 12
+      access_denied           = 13
+      dp_out_of_memory        = 14
+      disk_full               = 15
+      dp_timeout              = 16
+      OTHERS                  = 17.
+
+  IF tg_saida[] IS NOT INITIAL.
+    LOOP AT  tg_saida[] INTO wa_saida.
+      CLEAR wg_contrato.
+      SPLIT wa_saida  AT  ';'  INTO wg_contrato-zcontrato
+                                    vl_cpf
+                                    wg_contrato-cod_prestador
+                                    vl_dt_ini_contrato
+                                    vl_dt_fim_contrato
+                                    wg_contrato-zcod_funcao
+                                    vl_dt_admissao_empr
+                                    vl_dt_recisao_empr
+                                    wg_contrato-motiv_recisao
+                                    wg_contrato-justa_causa
+                                    vl_salario_base
+                                    vl_remun_mensal
+                                    vl_hr_trab_ini
+                                    vl_hr_trab_fim
+                                    vl_jornada_trab
+                                    wg_contrato-unidade
+                                    wg_contrato-utili_sistema
+                                    wg_contrato-tp_usuario
+                                    wg_contrato-acesso_sap
+                                    wg_contrato-fornecedor
+                                    vl_cnpj.
+
+
+      IF wg_contrato-zcontrato CO '0123456789'.
+
+        REPLACE ALL OCCURRENCES OF '.' IN  vl_cnpj WITH ''.
+        REPLACE ALL OCCURRENCES OF '/' IN  vl_cnpj WITH ''.
+        REPLACE ALL OCCURRENCES OF '-' IN  vl_cnpj WITH ''.
+
+        REPLACE ALL OCCURRENCES OF '.' IN  vl_cpf  WITH ''.
+        REPLACE ALL OCCURRENCES OF '-' IN  vl_cpf  WITH ''.
+
+        REPLACE ALL OCCURRENCES OF '.' IN  vl_salario_base WITH ''.
+        REPLACE ALL OCCURRENCES OF '.' IN  vl_remun_mensal WITH ''.
+        REPLACE ALL OCCURRENCES OF '.' IN  vl_jornada_trab WITH ''.
+
+        REPLACE ALL OCCURRENCES OF ',' IN  vl_salario_base WITH '.'.
+        REPLACE ALL OCCURRENCES OF ',' IN  vl_remun_mensal WITH '.'.
+        REPLACE ALL OCCURRENCES OF ',' IN  vl_jornada_trab WITH '.'.
+
+        REPLACE ALL OCCURRENCES OF ':' IN  vl_hr_trab_ini  WITH ''.
+        REPLACE ALL OCCURRENCES OF ':' IN  vl_hr_trab_fim  WITH ''.
+
+*---------------------------------------------------------------------*
+
+        PERFORM f_formatar_data USING vl_dt_ini_contrato
+                                CHANGING wg_contrato-dt_ini_contrato.
+
+        PERFORM f_formatar_data USING vl_dt_fim_contrato
+                                CHANGING wg_contrato-dt_fim_contrato.
+
+        PERFORM f_formatar_data USING vl_dt_admissao_empr
+                                CHANGING wg_contrato-dt_admissao_empr.
+
+        PERFORM f_formatar_data USING vl_dt_recisao_empr
+                                CHANGING wg_contrato-dt_recisao_empr.
+
+
+        wg_contrato-salario_base     = vl_salario_base.
+        wg_contrato-remun_mensal     = vl_remun_mensal.
+        wg_contrato-jornada_trab     = vl_jornada_trab.
+        wg_contrato-hr_trab_ini      = vl_hr_trab_ini.
+        wg_contrato-hr_trab_fim      = vl_hr_trab_fim.
+
+*---------------------------------------------------------------------*
+
+        IF vl_cpf IS NOT INITIAL.
+
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input  = vl_cpf
+            IMPORTING
+              output = vl_cpf_1.
+
+          PERFORM f_valida_cpf USING  vl_cpf_1.
+
+          wg_contrato-cpf              = vl_cpf_1.
+          wg_contrato-taxnum_arq       = wg_contrato-cpf.
+
+        ENDIF.
+
+*---------------------------------------------------------------------*
+
+        IF vl_cnpj IS NOT INITIAL.
+
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input  = vl_cnpj
+            IMPORTING
+              output = vl_cnpj_1.
+
+          PERFORM f_valida_cnpj USING  vl_cnpj_1.
+
+          wg_contrato-zcnpj_sub               = vl_cnpj_1.
+          wg_contrato-taxnum_cnpj             = wg_contrato-zcnpj_sub.
+
+        ENDIF.
+
+*---------------------------------------------------------------------*
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = wg_contrato-cod_prestador
+          IMPORTING
+            output = wg_contrato-cod_prestador.
+
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = wg_contrato-fornecedor
+          IMPORTING
+            output = wg_contrato-fornecedor.
+
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = wg_contrato-unidade
+          IMPORTING
+            output = wg_contrato-unidade.
+*---------------------------------------------------------------------*
+        APPEND wg_contrato TO tg_contrato.
+
+      ENDIF.
+
+    ENDLOOP.
+
+  ELSE.
+
+    vl_flag = 1.
+
+    CLEAR:  vl_attr1.
+
+    vl_attr1 = text-030.
+
+    PERFORM f_add_msg2 USING vl_attr1 space space space vl_flag.
+
+  ENDIF.
+
+ENDFORM.
+
+FORM f_valida_data USING vl_data TYPE sy-datum.
+  CLEAR vg_dt_valida.
+
+  CALL FUNCTION 'DATE_CHECK_PLAUSIBILITY'
+    EXPORTING
+      date                      = vl_data
+    EXCEPTIONS
+      plausibility_check_failed = 1
+      OTHERS                    = 2.
+
+  IF sy-subrc NE 0.
+
+    vl_flag = 1.
+    vg_dt_valida = abap_true.
+
+    CLEAR:  vl_attr1, vl_attr2.
+
+    vl_attr2 = vl_data.
+    vl_attr1 = text-028.
+
+    PERFORM f_add_msg2 USING vl_attr1 vl_attr2 space space vl_flag.
+
+  ENDIF.
+
+ENDFORM.
+
+FORM f_select_contrato.
+
+  zcl_select_0067=>get_zmmt0031(
+    EXPORTING
+      im_tg_contrato = tg_contrato    " Tabela Interna Contrato
+    CHANGING
+      ex_table       = tg_zmmt0031    " Retorno do Select
+  ).
+*-----------------------------------------------------------------------------*
+  zcl_select_0067=>get_dfkkbptaxnum(
+      EXPORTING
+        im_tg_contrato =  tg_contrato   " Tabela Interna Contrato
+      CHANGING
+        ex_table       =  tg_dfkkbptaxnum    " Retorno do Select
+    ).
+
+*-----------------------------------------------------------------------------*
+  zcl_select_0067=>get_dfkkbptaxnum_cnpj(
+    EXPORTING
+      im_tg_contrato = tg_contrato
+    CHANGING
+      ex_table       = tg_dfkkbptaxnum_2
+  ).
+
+*-----------------------------------------------------------------------------*
+  zcl_select_0067=>get_but000(
+    EXPORTING
+      im_tg_contrato       = tg_contrato    " Tabela Interna Contrato
+      im_tg_dfkkbptaxnum   = tg_dfkkbptaxnum
+      im_tg_dfkkbptaxnum_2 = tg_dfkkbptaxnum_2
+    CHANGING
+      ex_table             = tg_but000   " Retorno do Select
+  ).
+*-----------------------------------------------------------------------------*
+
+  zcl_select_0067=>get_t001w(
+    EXPORTING
+      im_tg_contrato = tg_contrato    " Tabela Interna Contrato
+    CHANGING
+      ex_table       =  tg_t001w   " Retorno do Select
+  ).
+
+*-----------------------------------------------------------------------------*
+  zcl_select_0067=>get_zmmt0030(
+    EXPORTING
+      im_tg_contrato = tg_contrato    " Tabela Interna Contrato
+    CHANGING
+      ex_table       = tg_zmmt0030   " Retorno do Select
+  ).
+*-----------------------------------------------------------------------------*
+  zcl_select_0067=>get_zmmt0035(
+      EXPORTING
+        im_tg_contrato =  tg_contrato   " Tabela Interna Contrato
+      CHANGING
+        ex_table       =  tg_zmmt0035  " Retorno do Select
+    ).
+
+ENDFORM.
+
+FORM f_verificar_arquivo.
+
+  FIELD-SYMBOLS <fs_contrato> TYPE zmms0067.
+  CLEAR vl_flag.
+
+  IF tg_contrato[] IS INITIAL.
+    "Não existe registros a processar.
+    vl_flag = 1.
+
+    CLEAR:  vl_attr1.
+
+    vl_attr1 = text-038.
+
+    PERFORM f_add_msg2 USING vl_attr1 space space space vl_flag.
+
+  ELSE.
+
+    PERFORM f_select_contrato.
+
+    SORT: tg_zmmt0035     BY zcontrato cod_prestador dt_ini_contrato,
+          tg_but000       BY partner,
+          tg_zmmt0030     BY zcodfuncao,
+          tg_zmmt0031     BY zcontrato zdataini zdatafim,
+          tg_t001w        BY werks.
+
+
+    LOOP AT tg_contrato  ASSIGNING <fs_contrato>.
+      CLEAR: wg_zmmt0035, wg_zmmt0035_aux, vl_flag, vl_message.
+
+      vl_konnr = <fs_contrato>-zcontrato.
+       " Verificar permissão de contrato
+      TRY.
+          zcl_mm0055_03=>validar_fiscal( iv_konnr = vl_konnr  ).
+
+        CATCH cx_oo_message INTO DATA(lcl_oo_message_055).
+          vl_message = lcl_oo_message_055->get_text( ).
+
+          IF NOT vl_message IS INITIAL.
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+            vl_attr1 = vl_message.
+            vl_attr2 = vl_konnr.
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+          ENDIF.
+      ENDTRY.
+
+      IF  <fs_contrato>-cod_prestador IS INITIAL AND <fs_contrato>-cpf IS INITIAL .
+        vl_flag = 1.
+
+        CLEAR:  vl_attr1.
+
+        vl_attr1 = text-039.
+        "“Preencher CPF ou Código do Prestador”.
+        PERFORM f_add_msg2 USING vl_attr1 space space space vl_flag.
+
+        CONTINUE.
+      ELSE.
+        IF <fs_contrato>-cod_prestador IS INITIAL.
+          READ TABLE tg_dfkkbptaxnum INTO ls_dfkkbptaxnum WITH KEY taxnum = <fs_contrato>-taxnum_arq.
+
+          IF sy-subrc EQ 0.
+            <fs_contrato>-cod_prestador = ls_dfkkbptaxnum-partner.
+          ENDIF.
+        ENDIF.
+
+        IF <fs_contrato>-cpf IS INITIAL.
+          READ TABLE tg_dfkkbptaxnum INTO ls_dfkkbptaxnum WITH KEY partner = <fs_contrato>-cod_prestador.
+
+          IF sy-subrc EQ 0.
+            <fs_contrato>-cpf = ls_dfkkbptaxnum-taxnum.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      "Validar Data
+      PERFORM f_valida_data USING <fs_contrato>-dt_ini_contrato.
+
+      READ TABLE tg_zmmt0035  WITH KEY  zcontrato       = <fs_contrato>-zcontrato
+                                        cod_prestador   = <fs_contrato>-cod_prestador
+                                        dt_ini_contrato = <fs_contrato>-dt_ini_contrato
+           INTO wg_zmmt0035  BINARY SEARCH.
+
+      IF sy-subrc EQ 0.
+
+        wg_zmmt0035_aux = wg_zmmt0035.
+
+        wg_zmmt0035-zcod_funcao           = <fs_contrato>-zcod_funcao.
+        wg_zmmt0035-cpf                   = <fs_contrato>-cpf.
+        wg_zmmt0035-dt_admissao_empr      = <fs_contrato>-dt_admissao_empr.
+        wg_zmmt0035-dt_recisao_empr       = <fs_contrato>-dt_recisao_empr.
+        wg_zmmt0035-motiv_recisao         = <fs_contrato>-motiv_recisao.
+        wg_zmmt0035-salario_base          = <fs_contrato>-salario_base.
+        wg_zmmt0035-remun_mensal          = <fs_contrato>-remun_mensal.
+        wg_zmmt0035-hr_trab_ini           = <fs_contrato>-hr_trab_ini.
+        wg_zmmt0035-hr_trab_fim           = <fs_contrato>-hr_trab_fim.
+        wg_zmmt0035-jornada_trab          = <fs_contrato>-jornada_trab.
+        wg_zmmt0035-fornecedor            = <fs_contrato>-fornecedor.
+        wg_zmmt0035-zcnpj_sub             = <fs_contrato>-zcnpj_sub.
+
+
+      ELSE.
+
+        wg_zmmt0035-zcontrato         = <fs_contrato>-zcontrato.
+        wg_zmmt0035-cod_prestador     = <fs_contrato>-cod_prestador.
+        wg_zmmt0035-cpf               = <fs_contrato>-cpf.
+        wg_zmmt0035-dt_ini_contrato   = <fs_contrato>-dt_ini_contrato.
+        wg_zmmt0035-dt_fim_contrato   = <fs_contrato>-dt_fim_contrato.
+        wg_zmmt0035-zcod_funcao       = <fs_contrato>-zcod_funcao .
+        wg_zmmt0035-dt_admissao_empr  = <fs_contrato>-dt_admissao_empr.
+        wg_zmmt0035-dt_recisao_empr   = <fs_contrato>-dt_recisao_empr.
+        wg_zmmt0035-motiv_recisao     = <fs_contrato>-motiv_recisao.
+        wg_zmmt0035-salario_base      = <fs_contrato>-salario_base.
+        wg_zmmt0035-remun_mensal      = <fs_contrato>-remun_mensal.
+        wg_zmmt0035-hr_trab_ini       = <fs_contrato>-hr_trab_ini.
+        wg_zmmt0035-hr_trab_fim       = <fs_contrato>-hr_trab_fim.
+        wg_zmmt0035-jornada_trab      = <fs_contrato>-jornada_trab.
+        wg_zmmt0035-unidade           = <fs_contrato>-unidade.
+        wg_zmmt0035-tp_usuario        = <fs_contrato>-tp_usuario.
+        wg_zmmt0035-fornecedor        = <fs_contrato>-fornecedor.
+        wg_zmmt0035-zcnpj_sub         = <fs_contrato>-zcnpj_sub.
+
+
+*---------------------------------------------------------------------------------------------------------------------------*
+        READ TABLE tg_but000  INTO ls_but000 WITH KEY partner = wg_zmmt0035-cod_prestador BINARY SEARCH.
+
+        IF sy-subrc EQ 0.
+*          IF NOT ls_but000-name_org1 IS INITIAL.
+*            wg_zmmt0035-nome_prestador = ls_but000-name_org1.
+*          ELSE.
+*            CONCATENATE ls_but000-name_first ls_but000-name_last INTO wg_zmmt0035-nome_prestador SEPARATED BY space.
+*          ENDIF.
+
+*---------------------------------------------------------------------------------------------------------------------------*
+        ELSE.
+
+          vl_flag = 1.
+
+          CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+          vl_attr1 = text-003.
+          vl_attr2 = <fs_contrato>-cod_prestador.
+          vl_attr3 = text-004.
+          vl_attr4 = text-045.
+
+          PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+        ENDIF.
+
+        MOVE sy-uname  TO wg_zmmt0035-nome_do_usuario.
+        MOVE sy-datum  TO wg_zmmt0035-dt_criacao_registro.
+        MOVE sy-uzeit  TO wg_zmmt0035-hr_criacao_registro.
+
+        MOVE abap_true TO wg_zmmt0035-info_sigal_atual.
+        MOVE abap_true TO wg_zmmt0035-info_idm_atual.
+
+      ENDIF.
+
+*--------------------------------------------------------------------------*
+      CLEAR ls_zmmt0031.
+      READ TABLE tg_zmmt0031 INTO ls_zmmt0031 WITH KEY zcontrato = wg_zmmt0035-zcontrato BINARY SEARCH.
+
+      IF sy-subrc NE 0.
+
+        vl_flag = 1.
+
+        CLEAR:  vl_attr1, vl_attr2, vl_attr3.
+
+        vl_attr1 = text-001.
+        vl_attr2 = <fs_contrato>-zcontrato.
+        vl_attr3 = text-002.
+
+        PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 space vl_flag.
+
+        "Não existem dados do contrato <Arquivo-Contrato> para contingenciamento.
+
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF vg_dt_valida IS INITIAL.
+        IF wg_zmmt0035-dt_ini_contrato LT ls_zmmt0031-zdataini.
+
+          vl_flag = 1.
+
+          CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+          vl_attr1 = text-006.
+          vl_attr2 = text-046.
+          vl_attr3 =  <fs_contrato>-zcontrato.
+          vl_attr4 =  <fs_contrato>-cod_prestador.
+
+
+          PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+          "A Data Inicial Prestação no Contrato deve ser igual ou posterior a Data Inicial do contrato. <Arquivo-Contrato>, <Arquivo-Código Prestador>.
+
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      PERFORM f_valida_data USING wg_zmmt0035-dt_admissao_empr.
+      IF vg_dt_valida IS INITIAL.
+        IF wg_zmmt0035-dt_ini_contrato LT wg_zmmt0035-dt_admissao_empr.
+
+          vl_flag = 1.
+
+          CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+          vl_attr1 = text-029.
+          vl_attr2 = text-047.
+          vl_attr3 =  <fs_contrato>-zcontrato.
+          vl_attr4 =  <fs_contrato>-cod_prestador.
+
+          PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+          "A Data Inicial Prestação no Contrato d ser igual ou posterior a Data Admissão Empresa. <Arquivo-Contrato>, <Arquivo-Código Prestador>.
+
+        ENDIF.
+      ENDIF.
+
+*--------------------------------------------------------------------------*
+
+      IF NOT <fs_contrato>-dt_fim_contrato IS INITIAL.
+        PERFORM f_valida_data USING <fs_contrato>-dt_fim_contrato.
+        IF vg_dt_valida IS INITIAL.
+          IF <fs_contrato>-dt_fim_contrato LE <fs_contrato>-dt_ini_contrato.
+
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+            vl_attr1 = text-007.
+            vl_attr2 = text-048.
+            vl_attr3 =  <fs_contrato>-zcontrato.
+            vl_attr4 =  <fs_contrato>-cod_prestador.
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+            "A Data Final Prestação no Contrato deve ser igual ou posterior a Data Inicial Prestação no Contrato. <Arquivo-Contrato>, <Arquivo-Código Prestador>.
+
+          ENDIF.
+
+          IF  <fs_contrato>-dt_fim_contrato GT ls_zmmt0031-zdatafim.
+
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+            vl_attr1 = text-009.
+            vl_attr2 = text-049.
+            vl_attr3 =  <fs_contrato>-zcontrato.
+            vl_attr4 =  <fs_contrato>-cod_prestador.
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+            "A Data Final Prestação no Contrato deve ser igual ou anterior a Data Final do contrato. <Arquivo-Contrato>, <Arquivo-Código Prestador>.
+
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF wg_zmmt0035-dt_recisao_empr IS NOT INITIAL.
+        PERFORM f_valida_data USING wg_zmmt0035-dt_recisao_empr.
+        IF vg_dt_valida IS INITIAL.
+          IF  wg_zmmt0035-dt_fim_contrato GT wg_zmmt0035-dt_recisao_empr.
+
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+            vl_attr1 = text-010.
+            vl_attr2 = text-050.
+            vl_attr3 =  <fs_contrato>-zcontrato.
+            vl_attr4 =  <fs_contrato>-cod_prestador.
+
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+            "A Data Final Prestação no Contrato "deve ser igual ou anterior a Data Rescisão Empresa. <Arquivo-Contrato>, <Arquivo-Código Prestador>”.
+
+          ENDIF.
+
+          IF wg_zmmt0035-dt_admissao_empr  GT wg_zmmt0035-dt_recisao_empr.
+
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+            vl_attr1 =  text-013.
+            vl_attr2 =  text-051.
+            vl_attr3 =  <fs_contrato>-zcontrato.
+            vl_attr4 =  <fs_contrato>-cod_prestador.
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 vl_attr4 vl_flag.
+
+            "A Data Admissão Empresa deve ser igual ou anterior a Data Rescisão Empresa. <Arquivo-Contrato>, <Arquivo-Código Prestador>.
+
+          ENDIF.
+
+          IF wg_zmmt0035-motiv_recisao  IS INITIAL.
+
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2.
+
+            vl_attr1 = text-016.
+            vl_attr2 = text-052.
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 space space vl_flag.
+
+            "Data Rescisão Empresa requer preenchimento de Motivo Rescisão Empresa.
+
+          ENDIF.
+
+          IF <fs_contrato>-justa_causa IS INITIAL.
+            vl_flag = 1.
+
+            CLEAR:  vl_attr1, vl_attr2.
+
+            vl_attr1 = text-017.
+            vl_attr2 = text-053.
+
+            PERFORM f_add_msg2 USING vl_attr1 vl_attr2 space space vl_flag.
+
+            "Data Rescisão Empresa requer preenchimento de Justa Causa.
+          ELSE.
+            IF <fs_contrato>-justa_causa = c_sim.
+              wg_zmmt0035-justa_causa = abap_true.
+            ELSE.
+              CLEAR wg_zmmt0035-justa_causa.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF <fs_contrato>-dt_fim_contrato IS INITIAL.
+
+        wg_zmmt0035-status_prestador = c_a.
+
+      ELSE.
+
+        wg_zmmt0035-status_prestador = c_i.
+
+        IF <fs_contrato>-dt_fim_contrato NE wg_zmmt0035-dt_fim_contrato.
+
+          wg_zmmt0035-dt_fim_contrato = <fs_contrato>-dt_fim_contrato.
+
+          MOVE abap_true  TO wg_zmmt0035-info_sigal_atual.
+          MOVE abap_true  TO wg_zmmt0035-info_idm_atual.
+
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      READ TABLE tg_zmmt0030 INTO ls_zmmt0030 WITH KEY zcodfuncao =  wg_zmmt0035-zcod_funcao BINARY SEARCH.
+
+      IF sy-subrc NE 0.
+
+        vl_flag = 1.
+
+        CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+        vl_attr1 = text-041.
+        vl_attr2 = wg_zmmt0035-zcod_funcao.
+        vl_attr3 = text-019.
+
+
+        PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 space vl_flag.
+
+        "Código Função não existe.
+
+      ENDIF.
+
+*--------------------------------------------------------------------------*
+      READ TABLE tg_t001w WITH KEY werks = <fs_contrato>-unidade
+           TRANSPORTING NO FIELDS
+           BINARY SEARCH.
+      IF sy-subrc IS INITIAL.
+        IF <fs_contrato>-unidade NE wg_zmmt0035-unidade.
+
+          wg_zmmt0035-unidade = <fs_contrato>-unidade.
+
+          MOVE abap_true TO wg_zmmt0035-info_sigal_atual.
+          MOVE abap_true TO wg_zmmt0035-info_idm_atual.
+
+        ENDIF.
+      ELSE.
+        vl_flag = 1.
+
+        CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+        vl_attr1 = text-018.
+        vl_attr2 = <fs_contrato>-unidade.
+        vl_attr3 = text-019.
+
+        PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 space vl_flag.
+
+        "Unidade <Arquivo-Unidade> não existe.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF <fs_contrato>-utili_sistema = c_sim.
+        <fs_contrato>-utili_sistema  = abap_true.
+      ELSE.
+        CLEAR <fs_contrato>-utili_sistema.
+      ENDIF.
+
+      IF <fs_contrato>-utili_sistema NE wg_zmmt0035-utili_sistema.
+
+        wg_zmmt0035-utili_sistema = <fs_contrato>-utili_sistema.
+
+        MOVE abap_true TO wg_zmmt0035-info_sigal_atual.
+        MOVE abap_true TO wg_zmmt0035-info_idm_atual.
+
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF wg_zmmt0035-utili_sistema EQ abap_true.
+        IF wg_contrato-tp_usuario  IS INITIAL.
+
+          vl_flag = 1.
+
+          CLEAR:  vl_attr1, vl_attr2.
+
+          vl_attr1 = text-021.
+          vl_attr2 = <fs_contrato>-cod_prestador.
+
+          PERFORM f_add_msg2 USING vl_attr1 vl_attr2 space space vl_flag.
+
+          "Preencher Tipo de Usuário para Prestador <Arquivo-Código Prestador>.
+
+        ELSE.
+          IF <fs_contrato>-tp_usuario NE wg_zmmt0035-tp_usuario.
+            wg_zmmt0035-tp_usuario = <fs_contrato>-tp_usuario.
+
+            MOVE abap_true TO wg_zmmt0035-info_sigal_atual.
+            MOVE abap_true TO wg_zmmt0035-info_idm_atual.
+
+          ENDIF.
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+
+      IF <fs_contrato>-acesso_sap EQ c_sim.
+        <fs_contrato>-acesso_sap  = abap_true.
+      ELSE.
+        CLEAR <fs_contrato>-acesso_sap.
+      ENDIF.
+
+      IF <fs_contrato>-acesso_sap NE wg_zmmt0035-acesso_sap.
+
+        wg_zmmt0035-acesso_sap   = <fs_contrato>-acesso_sap.
+
+        MOVE abap_true TO wg_zmmt0035-info_sigal_atual.
+        MOVE abap_true TO wg_zmmt0035-info_idm_atual.
+
+      ENDIF.
+*--------------------------------------------------------------------------*
+      IF <fs_contrato>-fornecedor IS NOT INITIAL OR <fs_contrato>-zcnpj_sub IS NOT INITIAL..
+        IF <fs_contrato>-fornecedor IS INITIAL.
+
+          READ TABLE tg_dfkkbptaxnum_2 INTO ls_dfkkbptaxnum WITH KEY taxnum = <fs_contrato>-taxnum_cnpj.
+
+          IF sy-subrc EQ 0.
+            wg_zmmt0035-fornecedor = ls_dfkkbptaxnum-partner.
+          ENDIF.
+        ELSE.
+          READ TABLE tg_dfkkbptaxnum_2 INTO ls_dfkkbptaxnum WITH KEY partner = <fs_contrato>-fornecedor.
+
+          IF sy-subrc EQ 0.
+            wg_zmmt0035-zcnpj_sub = ls_dfkkbptaxnum-taxnum.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      IF wg_zmmt0035-fornecedor IS NOT INITIAL.
+
+        READ TABLE tg_but000 INTO ls_but000 WITH KEY partner = wg_zmmt0035-fornecedor BINARY SEARCH.
+
+        IF sy-subrc NE 0.
+
+          vl_flag = 1.
+
+          CLEAR:  vl_attr1, vl_attr2, vl_attr3, vl_attr4.
+
+
+          vl_attr1 = text-023.
+          vl_attr2 = <fs_contrato>-fornecedor.
+          vl_attr3 = text-024.
+
+          PERFORM f_add_msg2 USING vl_attr1 vl_attr2 vl_attr3 space vl_flag.
+
+          "Fornecedor (subcontratado) <Arquivo-Fornecedor (subcontratado)> não existe.
+
+        ENDIF.
+      ENDIF.
+*--------------------------------------------------------------------------*
+      IF vl_flag EQ 0.
+
+        IF NOT wg_zmmt0035_aux IS INITIAL AND wg_zmmt0035 NE wg_zmmt0035_aux.
+
+          MOVE sy-uname TO wg_zmmt0035-ultimo_usuario_modificador.
+          MOVE sy-datum TO wg_zmmt0035-dt_ultima_modificacao.
+          MOVE sy-uzeit TO wg_zmmt0035-hr_ultima_modificacao.
+
+        ENDIF.
+
+        MODIFY zmmt0035 FROM wg_zmmt0035.
+*        APPEND wg_zmmt0035 TO tg_zmmt0035_aux.
+      ENDIF.
+    ENDLOOP.
+
+*    MODIFY zmmt0035 FROM TABLE tg_zmmt0035_aux.
+
+    "Processamento do arquivo efetuado.
+
+    CLEAR:  vl_attr1.
+
+    vl_attr1 = text-037.
+
+    PERFORM f_add_msg2 USING vl_attr1 space space space 0.
+
+  ENDIF.
+ENDFORM.
+
+
+FORM f_cria_log.
+
+  DATA: sl_bal_log TYPE bal_s_log.
+
+  sl_bal_log-extnumber  = c_zlogmmc0067.
+  sl_bal_log-object     = c_zlogmmc0067.
+  sl_bal_log-subobject  = c_zslogmmc0067.
+
+
+  sl_bal_log-aldate     = sy-datum.    "Data
+  sl_bal_log-altime     = sy-uzeit.    "Hora
+  sl_bal_log-aluser     = sy-uname.    "Nome do usuário
+  sl_bal_log-altcode    = sy-tcode.    "Nome da transação
+  sl_bal_log-alprog     = sy-cprog.    "Nome do Programa
+
+  IF lcl_bal_log IS NOT INITIAL.
+    FREE lcl_bal_log.
+  ENDIF.
+
+  TRY.
+      lcl_bal_log = NEW zcl_bc_bal_log( log_struc = sl_bal_log ).
+    CATCH cx_oo_message INTO lcl_exception.
+      MESSAGE lcl_exception TYPE 'E'.
+  ENDTRY.
+
+
+ENDFORM.
+
+
+FORM f_gravar_msg_log .
+
+  DATA wl_msg_add LIKE LINE OF tl_msg_add.
+
+  " Ordena pela posição de inserção(nivel) e pelo número da linha inserida(msg4).
+  SORT tl_msg_add BY nivel. "msg4.
+  LOOP AT tl_msg_add INTO wl_msg_add.
+    lcl_bal_log->add_msg( msg_type          = wl_msg_add-tipo
+                          msgid             = c_zlogmmc0067
+                          msgno             = 000
+                          attr1             = wl_msg_add-msg1
+                          attr2             = wl_msg_add-msg2
+                          attr3             = wl_msg_add-msg3
+                          attr4             = wl_msg_add-msg4 ).
+
+  ENDLOOP.
+
+ENDFORM.
+
+FORM f_salvar_log .
+  TRY .
+      lcl_bal_log->salvar( ).
+    CATCH cx_oo_message INTO lcl_exception.
+      MESSAGE lcl_exception TYPE 'E'.
+  ENDTRY.
+
+ENDFORM.
+
+FORM f_exibir_log .
+
+  TRY .
+      lcl_bal_log->display_log( 'LOG ZLOGMMC0067' ).
+    CATCH cx_oo_message INTO lcl_exception.
+      MESSAGE lcl_exception TYPE 'E'.
+  ENDTRY.
+
+ENDFORM.
+
+FORM f_add_msg2  USING p_attr1 TYPE char50
+                       p_attr2 TYPE char50
+                       p_attr3 TYPE char50
+                       p_attr4 TYPE char50
+                       im_flag TYPE i.
+
+  IF im_flag EQ 0 .
+    vl_tipo_msg = 'S'.
+  ELSE.
+    vl_tipo_msg = 'E'.
+  ENDIF.
+
+  lcl_bal_log->add_msg(
+              EXPORTING
+              msg_type         = vl_tipo_msg " Tipo de mensagem'
+              msgid            = c_class_msg
+              msgno            = 200
+              attr1            = p_attr1
+              attr2            = p_attr2
+              attr3            = p_attr3
+              attr4            = p_attr4
+              ).
+
+ENDFORM.
+
+FORM f_processar_arquivo.
+
+  PERFORM f_valid_formato_arquivo.
+  PERFORM f_get_arquivo.
+  PERFORM f_verificar_arquivo.
+
+ENDFORM.
+
+FORM f_exibir_log_filtrado.
+
+  CASE abap_true.
+
+    WHEN cb_log.
+
+      TRY .
+
+          lcl_bal_log->criterio_pesquisa(   i_object        = c_zlogmmc0067
+                                            i_subobject     = c_zslogmmc0067
+                                            i_aldate_from   = p_dtini
+                                            i_aldate_to     = p_dtfim
+                                            i_altime_from   = p_hrini
+                                            i_altime_to     = p_hrfim ).
+
+          lcl_bal_log->display_log_2( ).
+
+        CATCH cx_oo_message INTO lcl_exception.
+
+          MESSAGE text-031 TYPE 'I' DISPLAY LIKE 'E'.
+
+          EXIT.
+
+      ENDTRY.
+
+    WHEN OTHERS.
+
+      MESSAGE text-036 TYPE 'I' DISPLAY LIKE 'E'.
+
+  ENDCASE.
+
+ENDFORM.
+
+FORM f_formatar_data  USING    p_data_in
+                      CHANGING p_data_out.
+
+  IF NOT p_data_in IS INITIAL.
+    REPLACE ALL OCCURRENCES OF '.' IN  p_data_in  WITH ''.
+    REPLACE ALL OCCURRENCES OF '/' IN  p_data_in  WITH ''.
+
+    p_data_out(4)   = p_data_in+4(4).
+    p_data_out+4(2) = p_data_in+2(2).
+    p_data_out+6(2) = p_data_in(2).
+  ENDIF.
+ENDFORM.
+
+FORM f_valida_cpf USING  im_cpf.
+
+  MOVE im_cpf TO vl_cpf_2.
+
+  CALL FUNCTION 'HR_BR_CHECK_CPF_FORMAT'
+    EXPORTING
+      cpf_number               = vl_cpf_2
+    EXCEPTIONS
+      cpf_format_not_supported = 1
+      cpf_check_digit          = 2
+      OTHERS                   = 3.
+
+  IF sy-subrc NE 0.
+
+    vl_flag = 1.
+
+    CLEAR:  vl_attr1.
+
+    vl_attr1 = text-040.
+
+    PERFORM f_add_msg2 USING vl_attr1 space space space vl_flag.
+
+  ENDIF.
+
+ENDFORM.
+
+FORM f_valida_cnpj USING im_cnpj.
+
+  MOVE im_cnpj TO vl_cnpj_2.
+
+  CALL FUNCTION 'HR_BR_CHECK_CGC_FORMAT'
+    EXPORTING
+      cgc_number               = vl_cnpj_2
+    EXCEPTIONS
+      cgc_format_not_supported = 1
+      cgc_check_digit          = 2
+      OTHERS                   = 3.
+
+
+  IF sy-subrc NE 0.
+
+    vl_flag = 1.
+
+    CLEAR:  vl_attr1.
+
+    vl_attr1 = text-054.
+
+    PERFORM f_add_msg2 USING vl_attr1 space space space vl_flag.
+
+  ENDIF.
+
+ENDFORM.
